@@ -1,19 +1,15 @@
-use std::{io, sync::mpsc, thread, time::Duration};
-
+use std::{io, sync::mpsc, thread};
+use std::time::Duration;
 use crossterm::event::{KeyCode, KeyEventKind};
 use ratatui::{
     layout::{Constraint, Layout},
     prelude::{Buffer, Rect},
-    style::{Color, Style, Stylize},
-    symbols::border,
+    style::{Color, Stylize},
     text::Line,
-    widgets::{Block, Gauge, Widget},
-    widgets::canvas::Canvas,
+    widgets::{Block, Widget, Borders},
+    widgets::canvas::{Canvas, Rectangle},
     DefaultTerminal, Frame,
 };
-use ratatui::layout::Position;
-use ratatui::widgets::Borders;
-use ratatui::widgets::canvas::Rectangle;
 
 fn main() -> io::Result<()> {
     let mut terminal  = ratatui::init();
@@ -31,7 +27,12 @@ fn main() -> io::Result<()> {
         run_background_thread(tx_to_background_position_events, move_rx);
     });
 
-    let mut app = App{exit:false};
+    let mut app = App{
+        exit:false,
+        robot_pos: (10.0, 5.0),
+        path: vec![(10.0, 5.0)],
+        robot_size: (10.0, 5.0),
+         };
 
     let app_result = app.run(&mut terminal, main_rx, move_tx);
 
@@ -41,8 +42,8 @@ fn main() -> io::Result<()> {
 
 enum Event {
     Input(crossterm::event::KeyEvent),
-    Position(f64, f64),
-    MoveInstruction((i32, i32), (f64, f64)),
+    PositionChange(f64, f64),
+    MoveInstruction((i32, i32)),
 }
 
 fn handle_input_events(tx: mpsc::Sender<Event>) {
@@ -57,10 +58,23 @@ fn handle_input_events(tx: mpsc::Sender<Event>) {
 fn run_background_thread(tx: mpsc::Sender<Event>, rx: mpsc::Receiver<Event>) {
     loop {
         match rx.recv().unwrap() {
-            Event::Position(x, y) => {
-                // do some computations
-                let new_position = (x, y);
-                tx.send(Event::Position(new_position.0, new_position.1)).unwrap();
+            Event::MoveInstruction((dx, dy)) => {
+                let (x_change, y_change);
+
+                thread::sleep(Duration::from_millis(100)); // nasze obliczenia,
+                // teraz jak sie trzyma przycisk to sygnały się stackują w trakcie sleepa i robot później
+                // jedzie sam do przodu
+                let speed = 0.2;
+
+                match (dx, dy) {
+                    (-1, 0) => (x_change, y_change) = (-speed, 0.0),
+                    (1, 0) => (x_change, y_change) = (speed, 0.0),
+                    (0, -1) => (x_change, y_change) = (0.0, speed),
+                    (0, 1) => (x_change, y_change) = (0.0, -speed),
+                    _ => (x_change, y_change) = (0.0, 0.0),
+                }
+
+                tx.send(Event::PositionChange(x_change, y_change)).unwrap();
             },
             _ => {}
         }
@@ -69,6 +83,9 @@ fn run_background_thread(tx: mpsc::Sender<Event>, rx: mpsc::Receiver<Event>) {
 
 pub struct App{
     exit: bool,
+    robot_pos: (f64, f64),
+    path: Vec<(f64, f64)>,
+    robot_size: (f64, f64),
 }
 
 impl App{
@@ -76,7 +93,10 @@ impl App{
         while !self.exit {
             match rx.recv().unwrap() {
                 Event::Input(key_event) => self.handle_key_event(key_event, &background_tx)?,
-                Event::Position(x, y) => {}
+                Event::PositionChange(x, y) => {
+                    self.robot_pos = (self.robot_pos.0 + x, self.robot_pos.1 + y);
+                    self.path.push(self.robot_pos);
+                }
                 _ => {},
             }
             terminal.draw(|frame| self.draw(frame))?;
@@ -92,10 +112,10 @@ impl App{
         if key_event.kind == KeyEventKind::Press || key_event.kind == KeyEventKind::Repeat {
             match key_event.code {
                 KeyCode::Char('q') => self.exit = true,
-                KeyCode::Left => {},
-                KeyCode::Right => {},
-                KeyCode::Up => {},
-                KeyCode::Down => {},
+                KeyCode::Left => background_tx.send(Event::MoveInstruction((-1, 0))).unwrap(),
+                KeyCode::Right => background_tx.send(Event::MoveInstruction((1, 0))).unwrap(),
+                KeyCode::Up => background_tx.send(Event::MoveInstruction((0, -1))).unwrap(),
+                KeyCode::Down => background_tx.send(Event::MoveInstruction((0, 1))).unwrap(),
                 _ => {}
             }
         }
@@ -112,11 +132,16 @@ impl Widget for &App{
         let [title_area, map_area] = vertical_layout.areas(area);
         Line::from("Robot route mapper").bold().render(title_area, buf);
 
+        let (robot_new_x, robot_new_y) = (
+            -self.robot_size.0/2.0 + self.robot_pos.0,
+            -self.robot_size.1/2.0 + self.robot_pos.1,
+        );
+
         let robot = Rectangle {
-            x: (map_area.left() + map_area.width / 2) as f64,
-            y: (map_area.top() + map_area.height / 2) as f64,
-            width: 10.0,
-            height: 5.0,
+            x: robot_new_x,
+            y: robot_new_y,
+            width: self.robot_size.0,
+            height: self.robot_size.1,
             color: Color::Blue,
         };
 
@@ -124,6 +149,17 @@ impl Widget for &App{
             .block(Block::default().borders(Borders::ALL).title("Map"))
             .paint(|ctx| {
                 ctx.draw(&robot);
+
+                for window in self.path.windows(2) {
+                    let [(x1, y1), (x2, y2)] = [window[0], window[1]] else { continue; };
+                    ctx.draw(&ratatui::widgets::canvas::Line {
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        color: Color::Yellow,
+                    });
+                }
             })
             .x_bounds([map_area.left() as f64, map_area.right() as f64])
             .y_bounds([map_area.top() as f64, map_area.bottom() as f64]);
