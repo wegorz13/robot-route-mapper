@@ -5,6 +5,7 @@ import digitalio
 import pwmio
 import wifi
 import socketpool
+import json
 from secrets import secrets
 
 # Standby
@@ -144,7 +145,7 @@ while True:
     request = buffer[:size].decode("utf-8")
     print("Request:\n", request)
 
-    response_body = "OK"
+    response_body = {"status": "OK"}
     try:
         get_line = request.split(" ")[1].lstrip("/")
         path, _, query = get_line.partition("?")
@@ -165,26 +166,33 @@ while True:
                     move_backward()
                 elif cmd == "left":
                     go_left()
+                response_body = {"command": cmd, "status": "started"}
             elif cmd == "stop":
                 stop_all()
                 if last_cmd_time is not None:
                     elapsed = time.monotonic() - last_cmd_time
-                    response_body = f"{last_cmd} : {elapsed:.2f}"
+                    response_body = {
+                        "command": last_cmd,
+                        "time": round(elapsed, 2),
+                        "status": "stopped",
+                    }
                     last_cmd = None
                     last_cmd_time = None
                 else:
-                    response_body = "engines stopped"
+                    response_body = {"status": "engines stopped"}
             else:
-                response_body = "unknown command"
+                response_body = {"status": "unknown command"}
         else:
-            response_body = "command error"
+            response_body = {"status": "command error"}
     except Exception as e:
-        response_body = f"Error: {e}"
+        response_body = {"status": "error", "message": str(e)}
 
+    response_json = json.dumps(response_body)
     response = f"""\
 HTTP/1.1 200 OK
+Content-Type: application/json
 
-{response_body}
+{response_json}
 """
     conn.send(response.encode("utf-8"))
     conn.close()
