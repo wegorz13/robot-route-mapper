@@ -12,16 +12,18 @@ KEY_TO_CMD = {
     "down": "backward",
     "left": "left",
     "right": "right",
-    "space": "stop"
+    "space": "stop",
 }
 
 last_command = None
 
+
 def send_command(cmd):
     global last_command
-    if cmd != last_command:
+    # Zawsze wysyłaj "stop", nawet jeśli już było wysłane
+    if cmd == "stop" or cmd != last_command:
         try:
-            r = requests.get(f"{PICO_IP}/drive?cmd={cmd}", timeout=1)
+            r = requests.get(f"{PICO_IP}/drive?cmd={cmd}", timeout=20)
             print(f"Wysłano: {cmd} | Odpowiedź: {r.text}")
             last_command = cmd
         except Exception as e:

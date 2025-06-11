@@ -120,26 +120,29 @@ def turn_right():
 
 
 # --- Połączenie z WiFi ---
-print("Łączenie z WiFi...")
+print("Connecting with WiFi...")
 wifi.radio.connect(secrets["ssid"], secrets["password"])
-print("Połączono z:", secrets["ssid"])
-print("Adres IP:", wifi.radio.ipv4_address)
+print("Connected with:", secrets["ssid"])
+print("IP Adress:", wifi.radio.ipv4_address)
 
 # --- Serwer socketowy ---
 pool = socketpool.SocketPool(wifi.radio)
 server = pool.socket(pool.AF_INET, pool.SOCK_STREAM)
 server.bind((str(wifi.radio.ipv4_address), 80))
 server.listen(1)
-print("Nasłuchuję na porcie 80")
+print("Port 80")
 
 # --- Główna pętla ---
+last_cmd = None
+last_cmd_time = None
+
 while True:
     conn, addr = server.accept()
-    print("Połączono z:", addr)
+    print("Connected with:", addr)
     buffer = bytearray(1024)
     size = conn.recv_into(buffer)
     request = buffer[:size].decode("utf-8")
-    print("Żądanie:\n", request)
+    print("Request:\n", request)
 
     response_body = "OK"
     try:
@@ -150,27 +153,33 @@ while True:
             for param in query.split("&"):
                 if param.startswith("cmd="):
                     cmd = param.split("=")[1]
-            if cmd == "forward":
-                move_forward()
-                response_body = "Wszystkie silniki do przodu"
-            elif cmd == "right":
-                turn_right()  # skręt w prawo
-                response_body = "Skręt w prawo"
-            elif cmd == "backward":
-                move_backward()
-                response_body = "Wszystkie silniki do tyłu"
-            elif cmd == "left":
-                turn_left()
-                response_body = "Skręt w lewo"
+            if cmd in ["forward", "backward", "left", "right"]:
+                if last_cmd != cmd:
+                    last_cmd = cmd
+                    last_cmd_time = time.monotonic()
+                if cmd == "forward":
+                    move_forward()
+                elif cmd == "right":
+                    go_right()
+                elif cmd == "backward":
+                    move_backward()
+                elif cmd == "left":
+                    go_left()
             elif cmd == "stop":
                 stop_all()
-                response_body = "Wszystkie silniki zatrzymane"
+                if last_cmd_time is not None:
+                    elapsed = time.monotonic() - last_cmd_time
+                    response_body = f"{last_cmd} : {elapsed:.2f}"
+                    last_cmd = None
+                    last_cmd_time = None
+                else:
+                    response_body = "engines stopped"
             else:
-                response_body = "Nieznana komenda"
+                response_body = "unknown command"
         else:
-            response_body = "Użyj /drive?cmd=forward"
+            response_body = "command error"
     except Exception as e:
-        response_body = f"Błąd: {e}"
+        response_body = f"Error: {e}"
 
     response = f"""\
 HTTP/1.1 200 OK

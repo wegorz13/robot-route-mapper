@@ -151,60 +151,25 @@ while True:
                 if param.startswith("cmd="):
                     cmd = param.split("=")[1]
             if cmd == "forward":
-                if cmd == "forward":
-                    move_forward()
-                    time.sleep(1)
-                    stop_all()
-                    response_body = "Wszystkie silniki do przodu przez 1s"
+                move_forward()
+                time.sleep(1)
+                stop_all()
+                response_body = "Wszystkie silniki do przodu przez 1s"
             elif cmd == "right":
-                turn_right()  # skręt w prawo
-                start = time.monotonic()
-                # Czekaj aż komenda "stop" zostanie odebrana
-                while True:
-                    conn2, addr2 = server.accept()
-                    buffer2 = bytearray(1024)
-                    size2 = conn2.recv_into(buffer2)
-                    request2 = buffer2[:size2].decode("utf-8")
-                    print("Żądanie:\n", request2)
-                    get_line2 = request2.split(" ")[1].lstrip("/")
-                    path2, _, query2 = get_line2.partition("?")
-                    if path2 == "drive":
-                        cmd2 = None
-                        for param2 in query2.split("&"):
-                            if param2.startswith("cmd="):
-                                cmd2 = param2.split("=")[1]
-                        if cmd2 == "stop":
-                            stop_all()
-                            end = time.monotonic()
-                            elapsed = end - start
-                            response_body = f"Czas działania silników: {elapsed:.2f} sekundy"
+                go_right()
+                time.sleep(5)
+                stop_all()
+                response_body = "robot jedzie w prawo 5s"
             elif cmd == "backward":
                 move_backward()
                 time.sleep(1)
                 stop_all()
                 response_body = "Wszystkie silniki do tyłu przez 1s"
             elif cmd == "left":
-                turn_left()
-                start = time.monotonic()
-                # Czekaj aż komenda "stop" zostanie odebrana
-                while True:
-                    conn2, addr2 = server.accept()
-                    buffer2 = bytearray(1024)
-                    size2 = conn2.recv_into(buffer2)
-                    request2 = buffer2[:size2].decode("utf-8")
-                    print("Żądanie:\n", request2)
-                    get_line2 = request2.split(" ")[1].lstrip("/")
-                    path2, _, query2 = get_line2.partition("?")
-                    if path2 == "drive":
-                        cmd2 = None
-                        for param2 in query2.split("&"):
-                            if param2.startswith("cmd="):
-                                cmd2 = param2.split("=")[1]
-                        if cmd2 == "stop":
-                            stop_all()
-                            end = time.monotonic()
-                            elapsed = end - start
-                            response_body = f"Czas działania silników: {elapsed:.2f} sekundy"
+                go_left()
+                time.sleep(5)
+                stop_all()
+                response_body = "robot jedzie w lewo 5s"
             elif cmd == "stop":
                 stop_all()
                 response_body = "Wszystkie silniki zatrzymane"
