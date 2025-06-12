@@ -1,6 +1,6 @@
 use std::{io, sync::mpsc, thread};
-use std::time::Duration;
 use crossterm::event::{KeyCode, KeyEventKind};
+use reqwest::blocking::{Client};
 use ratatui::{
     layout::{Constraint, Layout},
     prelude::{Buffer, Rect},
@@ -10,7 +10,11 @@ use ratatui::{
     widgets::canvas::{Canvas, Rectangle},
     DefaultTerminal, Frame,
 };
+use serde::{Deserialize, Serialize};
 
+const ROBOT_SIZE:(f64, f64) = (10.0, 5.0);
+static ADDRESS:&str ="localhost:3000";
+// Program tworzy aplikację terminalową, która symuluje ruch robota i rysuje jego ścieżkę na mapie
 fn main() -> io::Result<()> {
     let mut terminal  = ratatui::init();
 
@@ -31,8 +35,8 @@ fn main() -> io::Result<()> {
         exit:false,
         robot_pos: (10.0, 5.0),
         path: vec![(10.0, 5.0)],
-        robot_size: (10.0, 5.0),
-         };
+        robot_size: ROBOT_SIZE,
+    };
 
     let app_result = app.run(&mut terminal, main_rx, move_tx);
 
@@ -43,7 +47,7 @@ fn main() -> io::Result<()> {
 enum Event {
     Input(crossterm::event::KeyEvent),
     PositionChange(f64, f64),
-    MoveInstruction((i32, i32)),
+    MoveInstruction(String),
 }
 
 fn handle_input_events(tx: mpsc::Sender<Event>) {
@@ -55,28 +59,78 @@ fn handle_input_events(tx: mpsc::Sender<Event>) {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct RobotResponse {
+    command: Option<String>,
+    status: String,
+    time: Option<f64>,
+    message: Option<String>,
+}
+
 fn run_background_thread(tx: mpsc::Sender<Event>, rx: mpsc::Receiver<Event>) {
+    let http_client =  Client::new();
+    let fwd_bwd_speed = 56.5/18.0* ROBOT_SIZE.0;
+    let lf_rt_speed = 20.0/12.0*ROBOT_SIZE.0;
+    let mut last_move = String::from("none");
     loop {
         match rx.recv().unwrap() {
-            Event::MoveInstruction((dx, dy)) => {
-                let (x_change, y_change);
+            Event::MoveInstruction(new_move) => {
+                if last_move!=new_move{
+                    let query_params =  [("cmd", "stop")];
+                    let response  = http_client.get( format!("http://{}/drive",ADDRESS))
+                        .query(&query_params)
+                        .send()
+                        .unwrap();
+                    let res_obj: RobotResponse = serde_json::from_str(response.text().unwrap().as_str()).unwrap();
 
-                thread::sleep(Duration::from_millis(100)); // nasze obliczenia,
-                // teraz jak sie trzyma przycisk to sygnały się stackują w trakcie sleepa i robot później
-                // jedzie sam do przodu
-                let speed = 0.2;
-
-                match (dx, dy) {
-                    (-1, 0) => (x_change, y_change) = (-speed, 0.0),
-                    (1, 0) => (x_change, y_change) = (speed, 0.0),
-                    (0, -1) => (x_change, y_change) = (0.0, speed),
-                    (0, 1) => (x_change, y_change) = (0.0, -speed),
-                    _ => (x_change, y_change) = (0.0, 0.0),
+                    let  ( mut x_change, mut y_change) = (0.0,0.0);
+                    if res_obj.status == "stopped"{
+                        match res_obj.command.unwrap().as_str() {
+                            "left" => (x_change, y_change) = (-lf_rt_speed*res_obj.time.unwrap(), 0.0),
+                            "right" => (x_change, y_change) = (lf_rt_speed*res_obj.time.unwrap(), 0.0),
+                            "forward" => (x_change, y_change) = (0.0, fwd_bwd_speed*res_obj.time.unwrap()),
+                            "backward"=> (x_change, y_change) = (0.0, -fwd_bwd_speed*res_obj.time.unwrap()),
+                            _ => (x_change, y_change) = (0.0, 0.0),
+                        }
+                    }
+                    last_move = String::from("none");
+                    tx.send(Event::PositionChange(x_change, y_change));
                 }
+                else if last_move == "none"{
+                    let query_params =  [("cmd", new_move.as_str())];
+                    let response  = http_client.get( format!("http://{}/drive",ADDRESS))
+                        .query(&query_params)
+                        .send()
+                        .unwrap();
 
-                tx.send(Event::PositionChange(x_change, y_change)).unwrap();
+                    let res_obj: RobotResponse = serde_json::from_str(response.text().unwrap().as_str()).unwrap();
+                    last_move = String::from(res_obj.command.unwrap_or("none".to_string()).as_str());
+                    
+                } 
             },
-            _ => {}
+            _ => {
+                if last_move!="none"{
+                    let query_params =  [("cmd", "stop")];
+                    let response  = http_client.get( format!("http://{}/drive",ADDRESS))
+                        .query(&query_params)
+                        .send()
+                        .unwrap();
+                    let res_obj: RobotResponse = serde_json::from_str(response.text().unwrap().as_str()).unwrap();
+
+                    let  ( mut x_change, mut y_change) = (0.0,0.0);
+                    if res_obj.status == "stopped"{
+                        match res_obj.command.unwrap().as_str() {
+                            "left" => (x_change, y_change) = (-lf_rt_speed*res_obj.time.unwrap(), 0.0),
+                            "right" => (x_change, y_change) = (lf_rt_speed*res_obj.time.unwrap(), 0.0),
+                            "forward" => (x_change, y_change) = (0.0, fwd_bwd_speed*res_obj.time.unwrap()),
+                            "backward"=> (x_change, y_change) = (0.0, -fwd_bwd_speed*res_obj.time.unwrap()),
+                            _ => (x_change, y_change) = (0.0, 0.0),
+                        }
+                    }
+                    last_move = String::from("none");
+                    tx.send(Event::PositionChange(x_change, y_change)).unwrap();   
+                }
+            }
         }
     }
 }
@@ -112,10 +166,10 @@ impl App{
         if key_event.kind == KeyEventKind::Press || key_event.kind == KeyEventKind::Repeat {
             match key_event.code {
                 KeyCode::Char('q') => self.exit = true,
-                KeyCode::Left => background_tx.send(Event::MoveInstruction((-1, 0))).unwrap(),
-                KeyCode::Right => background_tx.send(Event::MoveInstruction((1, 0))).unwrap(),
-                KeyCode::Up => background_tx.send(Event::MoveInstruction((0, -1))).unwrap(),
-                KeyCode::Down => background_tx.send(Event::MoveInstruction((0, 1))).unwrap(),
+                KeyCode::Left => background_tx.send(Event::MoveInstruction(String::from("left"))).unwrap(),
+                KeyCode::Right => background_tx.send(Event::MoveInstruction(String::from("right"))).unwrap(),
+                KeyCode::Up => background_tx.send(Event::MoveInstruction(String::from("forward"))).unwrap(),
+                KeyCode::Down => background_tx.send(Event::MoveInstruction(String::from("backward"))).unwrap(),
                 _ => {}
             }
         }
