@@ -13,7 +13,7 @@ use ratatui::{
 use serde::{Deserialize, Serialize};
 
 const ROBOT_SIZE:(f64, f64) = (10.0, 5.0);
-static ADDRESS:&str ="localhost:3000";
+static ADDRESS:&str ="192.168.137.192:80";
 // Program tworzy aplikację terminalową, która symuluje ruch robota i rysuje jego ścieżkę na mapie
 fn main() -> io::Result<()> {
     let mut terminal  = ratatui::init();
@@ -75,26 +75,26 @@ fn run_background_thread(tx: mpsc::Sender<Event>, rx: mpsc::Receiver<Event>) {
     loop {
         match rx.recv().unwrap() {
             Event::MoveInstruction(new_move) => {
-                if last_move!=new_move{
-                    let query_params =  [("cmd", "stop")];
-                    let response  = http_client.get( format!("http://{}/drive",ADDRESS))
-                        .query(&query_params)
-                        .send()
-                        .unwrap();
-                    let res_obj: RobotResponse = serde_json::from_str(response.text().unwrap().as_str()).unwrap();
+                if new_move == "stop"  || (last_move!=new_move && last_move!="none"){
+                        let query_params =  [("cmd", "stop")];
+                        let response  = http_client.get( format!("http://{}/drive",ADDRESS))
+                            .query(&query_params)
+                            .send()
+                            .unwrap();
+                        let res_obj: RobotResponse = serde_json::from_str(response.text().unwrap().as_str()).unwrap();
 
-                    let  ( mut x_change, mut y_change) = (0.0,0.0);
-                    if res_obj.status == "stopped"{
-                        match res_obj.command.unwrap().as_str() {
-                            "left" => (x_change, y_change) = (-lf_rt_speed*res_obj.time.unwrap(), 0.0),
-                            "right" => (x_change, y_change) = (lf_rt_speed*res_obj.time.unwrap(), 0.0),
-                            "forward" => (x_change, y_change) = (0.0, fwd_bwd_speed*res_obj.time.unwrap()),
-                            "backward"=> (x_change, y_change) = (0.0, -fwd_bwd_speed*res_obj.time.unwrap()),
-                            _ => (x_change, y_change) = (0.0, 0.0),
+                        let  ( mut x_change, mut y_change) = (0.0,0.0);
+                        if res_obj.status == "stopped"{
+                            match res_obj.command.unwrap().as_str() {
+                                "left" => (x_change, y_change) = (-lf_rt_speed*res_obj.time.unwrap(), 0.0),
+                                "right" => (x_change, y_change) = (lf_rt_speed*res_obj.time.unwrap(), 0.0),
+                                "forward" => (x_change, y_change) = (0.0, fwd_bwd_speed*res_obj.time.unwrap()),
+                                "backward"=> (x_change, y_change) = (0.0, -fwd_bwd_speed*res_obj.time.unwrap()),
+                                _ => (x_change, y_change) = (0.0, 0.0),
+                            }
                         }
-                    }
-                    last_move = String::from("none");
-                    tx.send(Event::PositionChange(x_change, y_change));
+                        last_move = String::from("none");
+                        tx.send(Event::PositionChange(x_change, y_change)).unwrap();
                 }
                 else if last_move == "none"{
                     let query_params =  [("cmd", new_move.as_str())];
@@ -105,31 +105,11 @@ fn run_background_thread(tx: mpsc::Sender<Event>, rx: mpsc::Receiver<Event>) {
 
                     let res_obj: RobotResponse = serde_json::from_str(response.text().unwrap().as_str()).unwrap();
                     last_move = String::from(res_obj.command.unwrap_or("none".to_string()).as_str());
-                    
-                } 
+
+                }
             },
             _ => {
-                if last_move!="none"{
-                    let query_params =  [("cmd", "stop")];
-                    let response  = http_client.get( format!("http://{}/drive",ADDRESS))
-                        .query(&query_params)
-                        .send()
-                        .unwrap();
-                    let res_obj: RobotResponse = serde_json::from_str(response.text().unwrap().as_str()).unwrap();
-
-                    let  ( mut x_change, mut y_change) = (0.0,0.0);
-                    if res_obj.status == "stopped"{
-                        match res_obj.command.unwrap().as_str() {
-                            "left" => (x_change, y_change) = (-lf_rt_speed*res_obj.time.unwrap(), 0.0),
-                            "right" => (x_change, y_change) = (lf_rt_speed*res_obj.time.unwrap(), 0.0),
-                            "forward" => (x_change, y_change) = (0.0, fwd_bwd_speed*res_obj.time.unwrap()),
-                            "backward"=> (x_change, y_change) = (0.0, -fwd_bwd_speed*res_obj.time.unwrap()),
-                            _ => (x_change, y_change) = (0.0, 0.0),
-                        }
-                    }
-                    last_move = String::from("none");
-                    tx.send(Event::PositionChange(x_change, y_change)).unwrap();   
-                }
+                eprintln!("Something went wrong");
             }
         }
     }
@@ -170,6 +150,7 @@ impl App{
                 KeyCode::Right => background_tx.send(Event::MoveInstruction(String::from("right"))).unwrap(),
                 KeyCode::Up => background_tx.send(Event::MoveInstruction(String::from("forward"))).unwrap(),
                 KeyCode::Down => background_tx.send(Event::MoveInstruction(String::from("backward"))).unwrap(),
+                KeyCode::Backspace => background_tx.send(Event::MoveInstruction(String::from("stop"))).unwrap(),
                 _ => {}
             }
         }
